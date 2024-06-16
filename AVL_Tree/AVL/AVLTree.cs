@@ -1,10 +1,15 @@
 ﻿using AVL_Tree.Entitys;
+using static System.Net.Mime.MediaTypeNames;
 
 namespace AVL_Tree.AVL
 {
     public class AVLTree
     {
-        private AVLNode root;
+        public AVLNode root { get; set; }
+
+        private readonly object lockObject = new object();
+        private int minAge = int.MaxValue;
+        private volatile bool meetInMiddle = false;
 
         private int Height(AVLNode node)
         {
@@ -262,7 +267,7 @@ namespace AVL_Tree.AVL
         }
 
         // Получение списка всех пользователей
-        public List<User> GetAllValues()
+        public List<User> GetAllUsers()
         {
             List<User> result = new List<User>();
             if (root == null)
@@ -285,6 +290,87 @@ namespace AVL_Tree.AVL
             }
 
             return result;
+        }
+
+
+
+        private void TraverseTopDown(AVLNode node, List<User> users, CancellationTokenSource cts)
+        {
+            if (node == null || cts.IsCancellationRequested) return;
+
+            TraverseTopDown(node.Left, users, cts);
+
+            lock (lockObject)
+            {
+                if (meetInMiddle) return;
+
+                if (node.Data.Age < minAge)
+                {
+                    minAge = node.Data.Age;
+                    users.Clear();
+                    users.Add(node.Data);
+                }
+                else if (node.Data.Age == minAge)
+                {
+                    users.Add(node.Data);
+                }
+
+                if (meetInMiddle)
+                {
+                    cts.Cancel();
+                }
+            }
+
+            TraverseTopDown(node.Right, users, cts);
+        }
+
+        private void TraverseBottomUp(AVLNode node, List<User> users, CancellationTokenSource cts)
+        {
+            if (node == null || cts.IsCancellationRequested) return;
+
+            TraverseBottomUp(node.Right, users, cts);
+
+            lock (lockObject)
+            {
+                if (meetInMiddle) return;
+
+                if (node.Data.Age < minAge)
+                {
+                    minAge = node.Data.Age;
+                    users.Clear();
+                    users.Add(node.Data);
+                }
+                else if (node.Data.Age == minAge)
+                {
+                    users.Add(node.Data);
+                }
+
+                if (meetInMiddle)
+                {
+                    cts.Cancel();
+                }
+            }
+
+            TraverseBottomUp(node.Left, users, cts);
+        }
+
+        public List<User> GetUsersWithMinAge()
+        {
+            if (root == null)
+                return new List<User>();
+
+            List<User> users = new List<User>();
+            CancellationTokenSource cts = new CancellationTokenSource();
+
+            Task topDownTask = Task.Run(() => TraverseTopDown(root, users, cts));
+            Task bottomUpTask = Task.Run(() => TraverseBottomUp(root, users, cts));
+
+            Task.WaitAny(topDownTask, bottomUpTask);
+            meetInMiddle = true;
+
+            Task.WaitAll(topDownTask, bottomUpTask);
+
+            return users;
         }
     }
 }
